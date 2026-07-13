@@ -88,7 +88,7 @@ async function postReminder(token) {
     headers: { Authorization: `Bearer ${token}` },
   }).then((r) => r.json())
   if (!auth.ok) throw new Error(`Slack auth error: ${auth.error}`)
-  const mention = `<@${auth.user_id}>`
+  const mention = '<!channel>'
   const res = await fetch('https://slack.com/api/chat.postMessage', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
