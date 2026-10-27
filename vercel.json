@@ -3,6 +3,10 @@
     {
       "path": "/hours/remind",
       "schedule": "0 0,1 * * 2"
+    },
+    {
+      "path": "/birthdays/announce",
+      "schedule": "0 16,17 * * *"
     }
   ]
 }
