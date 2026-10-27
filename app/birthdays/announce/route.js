@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { google } from 'googleapis'
 import { alertBotLog } from '@/lib/botlog'
-import { BIRTHDAY_SPREADSHEET_ID, BIRTHDAY_SHEET_GID } from '@/lib/destinations'
+import { BIRTHDAY_SPREADSHEET_ID, BIRTHDAY_SHEET_GID, BIRTHDAY_SHEET_TITLE } from '@/lib/destinations'
 import { findCelebrants, birthdayMessage, normalizeName } from '@/lib/birthdays'
 
 // Announces the day's birthdays (from the birthday sheet) in #random, once a
@@ -38,9 +38,19 @@ async function readSheet() {
   const sheets = google.sheets({ version: 'v4', auth })
   const spreadsheetId = BIRTHDAY_SPREADSHEET_ID
   const meta = await sheets.spreadsheets.get({ spreadsheetId })
-  const sheet = meta.data.sheets?.find((s) => s.properties?.sheetId === BIRTHDAY_SHEET_GID) || meta.data.sheets?.[0]
-  const tab = sheet?.properties?.title ?? 'Sheet1'
-  const res = await sheets.spreadsheets.values.get({ spreadsheetId, range: `${tab}!A1:Z500` })
+  // By gid, then by tab name. Never fall back to another tab: the first tab
+  // (Leadership) also has a Birthday column, so a wrong tab reads as "no
+  // birthdays today" and nothing posts. Missing tab → error → #bot-logs.
+  const tabs = meta.data.sheets || []
+  const title = (s) => s.properties?.title?.trim().toLowerCase()
+  const sheet =
+    tabs.find((s) => s.properties?.sheetId === BIRTHDAY_SHEET_GID) ||
+    tabs.find((s) => title(s) === BIRTHDAY_SHEET_TITLE.toLowerCase())
+  if (!sheet) {
+    throw new Error(`birthday sheet: no tab with gid ${BIRTHDAY_SHEET_GID} or named "${BIRTHDAY_SHEET_TITLE}" (tabs: ${tabs.map((s) => s.properties?.title).join(', ')})`)
+  }
+  const tab = sheet.properties.title
+  const res = await sheets.spreadsheets.values.get({ spreadsheetId, range: `'${tab.replace(/'/g, "''")}'!A1:Z500` })
   return res.data.values || []
 }
 
