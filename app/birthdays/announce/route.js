@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server'
 import { google } from 'googleapis'
 import { alertBotLog } from '@/lib/botlog'
-import { BIRTHDAY_SPREADSHEET_ID, BIRTHDAY_SHEET_GID, BIRTHDAY_SHEET_TITLE } from '@/lib/destinations'
-import { findCelebrants, birthdayMessage, normalizeName } from '@/lib/birthdays'
+import { BIRTHDAY_SPREADSHEET_ID, BIRTHDAY_SHEET_GID, BIRTHDAY_SHEET_TITLE, BIRTHDAY_SLACK_IDS } from '@/lib/destinations'
+import { findCelebrants, birthdayMessage, buildRoster } from '@/lib/birthdays'
+
+// Room to wait out a Slack rate limit on users.list.
+export const maxDuration = 60
 
 // Announces the day's birthdays (from the birthday sheet) in #random, once a
 // day at 9am Vancouver time. The cron fires 16:00 and 17:00 UTC (9am PT across
@@ -54,21 +57,28 @@ async function readSheet() {
   return res.data.values || []
 }
 
-// Slack real names → user ids, so the message can @-mention people.
-async function slackRoster(token) {
-  const data = await fetch('https://slack.com/api/users.list', {
-    headers: { Authorization: `Bearer ${token}` },
-  }).then((r) => r.json())
-  const roster = new Map()
-  if (!data.ok) return roster // mentions are a nicety; names still post
-  for (const m of data.members || []) {
-    if (m.is_bot || m.deleted) continue
-    for (const n of [m.profile?.real_name, m.real_name, m.profile?.display_name]) {
-      const key = normalizeName(n)
-      if (key && !roster.has(key)) roster.set(key, m.id)
-    }
+// Everyone on Slack, for @-mentions. users.list is rate-limited (429 +
+// Retry-After), so wait and retry rather than quietly posting without tags.
+async function slackMembers(token) {
+  const members = []
+  let cursor = ''
+  do {
+    const data = await slackGet(token, `users.list?limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`)
+    members.push(...(data.members || []))
+    cursor = data.response_metadata?.next_cursor || ''
+  } while (cursor)
+  return members
+}
+
+async function slackGet(token, path, tries = 3) {
+  for (let i = 1; ; i++) {
+    const res = await fetch(`https://slack.com/api/${path}`, { headers: { Authorization: `Bearer ${token}` } })
+    const data = await res.json().catch(() => ({ ok: false, error: `http_${res.status}` }))
+    if (data.ok) return data
+    if (data.error !== 'ratelimited' || i >= tries) throw new Error(`Slack ${path.split('?')[0]}: ${data.error}`)
+    const wait = Math.min(Number(res.headers.get('retry-after')) || 5, 20)
+    await new Promise((r) => setTimeout(r, wait * 1000))
   }
-  return roster
 }
 
 async function post(token, text) {
@@ -102,8 +112,18 @@ export async function GET(req) {
   try {
     const celebrants = findCelebrants(await readSheet(), today)
     if (celebrants.length === 0) return NextResponse.json({ ok: true, date: today, celebrants })
-    const text = birthdayMessage(celebrants, await slackRoster(token))
-    if (dry) return NextResponse.json({ ok: true, dry: true, date: today, celebrants, text })
+    // Mentions are worth retrying for but not worth skipping a birthday over:
+    // if the roster can't load, post with plain names and say so in #bot-logs.
+    let roster = buildRoster()
+    let rosterError
+    try {
+      roster = buildRoster(await slackMembers(token))
+    } catch (err) {
+      rosterError = err.message
+      if (!dry) await alertBotLog(`birthday announcement posted without @-mentions: ${err.message}`)
+    }
+    const text = birthdayMessage(celebrants, roster, BIRTHDAY_SLACK_IDS)
+    if (dry) return NextResponse.json({ ok: true, dry: true, date: today, celebrants, text, rosterError })
     const slack = await post(token, text)
     return NextResponse.json({ ok: true, date: today, celebrants, channel: CHANNEL, ts: slack.ts })
   } catch (err) {
