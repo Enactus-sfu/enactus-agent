@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
-import { findSimilar } from '@/lib/similarity'
+import { PROJECTS, PORTFOLIOS, TEAMS } from '@/lib/teams'
 
 const TYPES = [
   { id: 'reimbursement', label: 'Reimbursement' },
@@ -18,7 +18,6 @@ const STEPS = [
 
 const DRAFT_KEY = 'finance-draft'
 const SAVED_INFO_KEY = 'finance-saved-info'
-const RECENTS_KEY = 'finance-recent-events'
 
 const inputBase = 'w-full rounded-md border px-3.5 py-2.5 text-sm text-zinc-900 placeholder-zinc-400 outline-none transition bg-white'
 const inputClass = `${inputBase} border-zinc-200 focus:border-zinc-400 focus:ring-2 focus:ring-zinc-100`
@@ -26,308 +25,6 @@ const inputErrorClass = `${inputBase} border-red-400 focus:border-red-400 focus:
 
 function fieldCls(hasError) {
   return hasError ? inputErrorClass : inputClass
-}
-
-// Wraps the matched substring of `text` in a subtle highlight.
-function highlightMatch(text, query) {
-  const q = query.trim()
-  if (!q) return text
-  const idx = text.toLowerCase().indexOf(q.toLowerCase())
-  if (idx === -1) return text
-  return (
-    <>
-      {text.slice(0, idx)}
-      <mark className="rounded-sm bg-zinc-200 px-0.5 font-medium text-zinc-900">
-        {text.slice(idx, idx + q.length)}
-      </mark>
-      {text.slice(idx + q.length)}
-    </>
-  )
-}
-
-function formatEventDate(d) {
-  if (!d) return ''
-  const dt = new Date(`${d}T00:00:00`)
-  if (isNaN(dt)) return ''
-  return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-}
-
-// Tags where an event came from: the team calendar vs a custom/saved event.
-function SourceBadge({ source }) {
-  const isCalendar = source === 'calendar'
-  return (
-    <span
-      className={`flex-shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium ${
-        isCalendar ? 'bg-zinc-100 text-zinc-600' : 'border border-zinc-200 text-zinc-400'
-      }`}
-    >
-      {isCalendar ? 'Calendar' : 'Custom'}
-    </span>
-  )
-}
-
-function EventSearch({ events, value, onChange, hasError }) {
-  const [open, setOpen] = useState(false)
-  const [query, setQuery] = useState('')
-  const [showNew, setShowNew] = useState(false)
-  const [newName, setNewName] = useState('')
-  const [recents, setRecents] = useState([])
-  const [duplicates, setDuplicates] = useState([])
-  const containerRef = useRef(null)
-
-  const eventNames = useMemo(() => events.map((e) => e.name), [events])
-
-  useEffect(() => {
-    function handler(e) {
-      if (!containerRef.current?.contains(e.target)) {
-        setOpen(false)
-        setQuery('')
-        setShowNew(false)
-        setNewName('')
-        setDuplicates([])
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [])
-
-  useEffect(() => {
-    try {
-      const r = JSON.parse(localStorage.getItem(RECENTS_KEY) ?? '[]')
-      setRecents(r.slice(0, 3))
-    } catch {}
-  }, [])
-
-  function addToRecents(ev) {
-    try {
-      const current = JSON.parse(localStorage.getItem(RECENTS_KEY) ?? '[]')
-      const updated = [ev, ...current.filter((e) => e !== ev)].slice(0, 3)
-      localStorage.setItem(RECENTS_KEY, JSON.stringify(updated))
-      setRecents(updated)
-    } catch {}
-  }
-
-  function select(ev) {
-    onChange(ev)
-    addToRecents(ev)
-    setOpen(false)
-    setQuery('')
-    setShowNew(false)
-    setNewName('')
-    setDuplicates([])
-  }
-
-  function handleAdd() {
-    const name = newName.trim()
-    if (!name) return
-
-    // Exact case-insensitive match → silently use the existing event
-    const exact = eventNames.find(
-      (ev) => ev.toLowerCase().trim() === name.toLowerCase()
-    )
-    if (exact) { select(exact); return }
-
-    // Fuzzy match — show warning if anything is close enough
-    const matches = findSimilar(name, eventNames)
-    if (matches.length > 0) { setDuplicates(matches); return }
-
-    select(name)
-  }
-
-  const q = query.trim().toLowerCase()
-  const filtered = q ? events.filter((ev) => ev.name.toLowerCase().includes(q)) : []
-  const latest = events.slice(0, 6)
-
-  return (
-    <div ref={containerRef}>
-      {/* Selected chip */}
-      {value && (
-        <div className="flex items-center gap-2 mb-2">
-          <span className="px-2.5 py-1 rounded-md text-xs font-medium bg-zinc-900 text-white">{value}</span>
-          <button
-            type="button"
-            onClick={() => onChange('')}
-            className="text-xs text-zinc-400 hover:text-zinc-700 transition-colors"
-          >
-            Change
-          </button>
-        </div>
-      )}
-
-      {/* Search input */}
-      <input
-        type="text"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        onFocus={() => setOpen(true)}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') { setOpen(false); setQuery('') }
-          if (e.key === 'Enter' && filtered.length === 1) { e.preventDefault(); select(filtered[0]) }
-        }}
-        placeholder="Search events..."
-        autoComplete="off"
-        className={fieldCls(hasError)}
-      />
-
-      {/* Animated inline panel */}
-      <div className={`grid transition-[grid-template-rows] duration-200 ease-out ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
-        <div className="overflow-hidden">
-          <div className="space-y-3 pt-3 pb-0.5">
-
-            {/* Search results */}
-            {query.trim() && filtered.length > 0 && (
-              <ul className="rounded-md border border-zinc-100 bg-zinc-50 divide-y divide-zinc-100 overflow-hidden">
-                {filtered.map((ev) => (
-                  <li
-                    key={ev.name}
-                    onClick={() => select(ev.name)}
-                    className="flex items-center justify-between gap-3 px-3.5 py-2 text-sm cursor-pointer hover:bg-white text-zinc-700"
-                  >
-                    <span className="truncate">{highlightMatch(ev.name, query)}</span>
-                    <span className="flex flex-shrink-0 items-center gap-2">
-                      <SourceBadge source={ev.source} />
-                      {ev.date && <span className="text-xs text-zinc-400">{formatEventDate(ev.date)}</span>}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            {query.trim() && filtered.length === 0 && (
-              <p className="text-xs text-zinc-400">No events match &ldquo;{query}&rdquo;</p>
-            )}
-
-            {/* Recently used (this device) */}
-            {!query.trim() && recents.length > 0 && (
-              <div className="space-y-1.5">
-                <p className="text-xs font-medium text-zinc-400">Recently used</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {recents.map((ev) => (
-                    <button
-                      key={ev}
-                      type="button"
-                      onClick={() => select(ev)}
-                      className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${
-                        value === ev
-                          ? 'bg-zinc-900 text-white border-zinc-900'
-                          : 'bg-white text-zinc-600 border-zinc-200 hover:border-zinc-400 hover:text-zinc-900'
-                      }`}
-                    >
-                      {ev}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Latest Events-team events (±1 month) */}
-            {!query.trim() && latest.length > 0 && (
-              <div className="space-y-1.5">
-                <p className="text-xs font-medium text-zinc-400">Latest events</p>
-                <ul className="rounded-md border border-zinc-100 bg-zinc-50 divide-y divide-zinc-100 overflow-hidden">
-                  {latest.map((ev) => (
-                    <li
-                      key={ev.name}
-                      onClick={() => select(ev.name)}
-                      className="flex items-center justify-between gap-3 px-3.5 py-2 text-sm cursor-pointer hover:bg-white text-zinc-700"
-                    >
-                      <span className="truncate">{ev.name}</span>
-                      <span className="flex flex-shrink-0 items-center gap-2">
-                        <SourceBadge source={ev.source} />
-                        {ev.date && <span className="text-xs text-zinc-400">{formatEventDate(ev.date)}</span>}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {!query.trim() && latest.length === 0 && (
-              <p className="text-xs text-zinc-400">No recent events from the Events team.</p>
-            )}
-
-            {/* New event / duplicate warning */}
-            {!showNew ? (
-              <button
-                type="button"
-                onClick={() => setShowNew(true)}
-                className="text-xs text-zinc-400 hover:text-zinc-700 transition-colors"
-              >
-                + New event
-              </button>
-            ) : duplicates.length > 0 ? (
-              <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3 space-y-2.5">
-                <p className="text-xs font-medium text-zinc-500">Similar events found — is this the same?</p>
-                <ul className="space-y-2">
-                  {duplicates.slice(0, 3).map(({ name, score }) => (
-                    <li key={name} className="flex items-center justify-between gap-3">
-                      <span className="text-sm font-medium text-zinc-800 truncate">{name}</span>
-                      <div className="flex items-center gap-2.5 flex-shrink-0">
-                        <span className="text-xs text-zinc-400">{Math.round(score * 100)}%</span>
-                        <button
-                          type="button"
-                          onClick={() => select(name)}
-                          className="text-xs font-medium text-zinc-600 underline underline-offset-2 hover:text-zinc-900 transition-colors"
-                        >
-                          Use this
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-                <div className="flex items-center justify-between pt-2 border-t border-zinc-200">
-                  <button
-                    type="button"
-                    onClick={() => select(newName.trim())}
-                    className="text-xs text-zinc-500 hover:text-zinc-700 transition-colors"
-                  >
-                    Create &ldquo;{newName.trim()}&rdquo; anyway
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDuplicates([])}
-                    className="text-xs text-zinc-400 hover:text-zinc-700 transition-colors"
-                  >
-                    Back
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  placeholder="Event name"
-                  autoFocus
-                  className={inputClass}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') { e.preventDefault(); handleAdd() }
-                    if (e.key === 'Escape') { setShowNew(false); setNewName('') }
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={handleAdd}
-                  className="px-3 rounded-md bg-zinc-900 text-white text-sm font-medium hover:bg-zinc-700 transition-colors whitespace-nowrap"
-                >
-                  Add
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setShowNew(false); setNewName(''); setDuplicates([]) }}
-                  className="px-3 rounded-md border border-zinc-200 text-zinc-600 text-sm hover:bg-zinc-50 transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-            )}
-
-          </div>
-        </div>
-      </div>
-    </div>
-  )
 }
 
 function StepList({ steps, currentStep, failedStep }) {
@@ -375,9 +72,8 @@ export default function FinancePage() {
     etransferName: '',
     etransferEmail: '',
   })
-  const [eventValue, setEventValue] = useState('')
+  const [team, setTeam] = useState('')
   const submissionId = useRef(crypto.randomUUID())
-  const [events, setEvents] = useState([])
   const [receipt, setReceipt] = useState(null)
   const [status, setStatus] = useState('idle')
   const [errorMsg, setErrorMsg] = useState('')
@@ -386,13 +82,6 @@ export default function FinancePage() {
   const [failedStep, setFailedStep] = useState(-1)
   const [successSummary, setSuccessSummary] = useState(null)
   const [saveInfo, setSaveInfo] = useState(false)
-
-  useEffect(() => {
-    fetch('/api/finance/events')
-      .then((r) => r.json())
-      .then((data) => setEvents(data.events ?? []))
-      .catch(() => setEvents([]))
-  }, [])
 
   // Load saved info then draft on mount
   useEffect(() => {
@@ -412,9 +101,9 @@ export default function FinancePage() {
     try {
       const d = localStorage.getItem(DRAFT_KEY)
       if (!d) return
-      const { type: t, eventValue: ev, form: f } = JSON.parse(d)
+      const { type: t, team: tm, form: f } = JSON.parse(d)
       if (t) setType(t)
-      if (ev !== undefined) setEventValue(ev)
+      if (TEAMS.includes(tm)) setTeam(tm)
       if (f) setForm((prev) => ({
         ...prev,
         item: f.item ?? prev.item,
@@ -429,11 +118,11 @@ export default function FinancePage() {
     try {
       localStorage.setItem(DRAFT_KEY, JSON.stringify({
         type,
-        eventValue,
+        team,
         form: { item: form.item, date: form.date, amount: form.amount },
       }))
     } catch {}
-  }, [type, eventValue, form.item, form.date, form.amount])
+  }, [type, team, form.item, form.date, form.amount])
 
   // Save e-transfer info when checkbox is on
   useEffect(() => {
@@ -486,7 +175,7 @@ export default function FinancePage() {
     e.preventDefault()
 
     const errors = {}
-    if (!eventValue.trim()) errors.event = 'Please select or enter an event.'
+    if (!team) errors.team = 'Please choose a project or portfolio.'
     if (type === 'reimbursement' && !receipt) errors.receipt = 'Receipt is required for reimbursements.'
     if (!form.amount || isNaN(parseFloat(form.amount))) errors.amount = 'Please enter a valid amount.'
     if (Object.keys(errors).length > 0) {
@@ -510,7 +199,7 @@ export default function FinancePage() {
     formData.append('amount', form.amount)
     formData.append('etransferName', form.etransferName)
     formData.append('etransferEmail', form.etransferEmail)
-    formData.append('event', eventValue.trim())
+    formData.append('team', team)
     if (receipt) formData.append('receipt', receipt)
 
     try {
@@ -550,12 +239,6 @@ export default function FinancePage() {
           if (payload.done) {
             setCurrentStep(STEPS.length)
             setSuccessSummary(payload.summary)
-            const name = eventValue.trim()
-            const isNew = !events.some((e) => e.name.toLowerCase() === name.toLowerCase())
-            if (isNew) {
-              const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Vancouver' })
-              setEvents((prev) => [{ name, date: today, source: 'custom' }, ...prev])
-            }
             submissionId.current = crypto.randomUUID()
             localStorage.removeItem(DRAFT_KEY)
             setForm((prev) => ({
@@ -567,7 +250,7 @@ export default function FinancePage() {
               etransferName: saveInfo ? prev.etransferName : '',
               etransferEmail: saveInfo ? prev.etransferEmail : '',
             }))
-            setEventValue('')
+            setTeam('')
             setReceipt(null)
             setStatus('success')
             return
@@ -603,8 +286,8 @@ export default function FinancePage() {
               <span className="font-medium text-zinc-900 text-right max-w-[60%] truncate">{successSummary.item}</span>
             </div>
             <div className="flex justify-between text-sm">
-              <span className="text-zinc-500">Event</span>
-              <span className="font-medium text-zinc-900">{successSummary.event}</span>
+              <span className="text-zinc-500">Project/Portfolio</span>
+              <span className="font-medium text-zinc-900">{successSummary.team}</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-zinc-500">E-transfer to</span>
@@ -662,14 +345,22 @@ export default function FinancePage() {
 
         <form onSubmit={handleSubmit} className="space-y-5">
           <div className="space-y-1.5">
-            <label className="block text-sm font-medium text-zinc-700">Event</label>
-            <EventSearch
-              events={events}
-              value={eventValue}
-              onChange={(v) => { setEventValue(v); clearError('event') }}
-              hasError={!!fieldErrors.event}
-            />
-            {fieldErrors.event && <p className="text-xs text-red-500">{fieldErrors.event}</p>}
+            <label htmlFor="team" className="block text-sm font-medium text-zinc-700">Project/Portfolio</label>
+            <select
+              id="team"
+              value={team}
+              onChange={(e) => { setTeam(e.target.value); clearError('team') }}
+              className={fieldCls(fieldErrors.team)}
+            >
+              <option value="" disabled>Choose a project or portfolio</option>
+              <optgroup label="Projects">
+                {PROJECTS.map((t) => <option key={t} value={t}>{t}</option>)}
+              </optgroup>
+              <optgroup label="Portfolios">
+                {PORTFOLIOS.map((t) => <option key={t} value={t}>{t}</option>)}
+              </optgroup>
+            </select>
+            {fieldErrors.team && <p className="text-xs text-red-500">{fieldErrors.team}</p>}
           </div>
 
           <div className="space-y-1.5">

@@ -4,6 +4,7 @@ import { uploadReceiptToDrive } from '@/lib/drive'
 import Finance from '@/lib/models/Finance'
 import { appendFinanceRow } from '@/lib/sheets'
 import { postFinanceToSlack } from '@/lib/slack'
+import { TEAMS } from '@/lib/teams'
 
 const encoder = new TextEncoder()
 
@@ -21,12 +22,16 @@ export async function POST(req) {
   const amount = formData.get('amount')
   const etransferName = formData.get('etransferName')
   const etransferEmail = formData.get('etransferEmail')
-  const event = formData.get('event')
+  const team = formData.get('team')
   const receipt = formData.get('receipt')
   const hasReceipt = receipt instanceof File && receipt.size > 0
 
-  if (!submissionId || !type || !item || !date || !amount || !etransferName || !etransferEmail || !event) {
+  if (!submissionId || !type || !item || !date || !amount || !etransferName || !etransferEmail || !team) {
     return NextResponse.json({ error: 'All fields are required.' }, { status: 400 })
+  }
+
+  if (!TEAMS.includes(team)) {
+    return NextResponse.json({ error: 'Unknown project or portfolio.' }, { status: 400 })
   }
 
   if (type === 'reimbursement' && !hasReceipt) {
@@ -38,11 +43,11 @@ export async function POST(req) {
       try {
         emit(controller, { step: 0 })
         const receiptUrl = hasReceipt
-          ? await uploadReceiptToDrive(receipt, { item, etransferName, event })
+          ? await uploadReceiptToDrive(receipt, { item, etransferName, team })
           : ''
 
         emit(controller, { step: 1 })
-        const data = { submissionId, type, item, date, amount, etransferName, etransferEmail, event, receiptUrl }
+        const data = { submissionId, type, item, date, amount, etransferName, etransferEmail, team, receiptUrl }
         await connectDB()
         try {
           await Finance.create(data)
@@ -60,7 +65,7 @@ export async function POST(req) {
         emit(controller, { step: 3 })
         await postFinanceToSlack(data)
 
-        emit(controller, { done: true, summary: { type, item, amount, event, etransferName, hasReceipt } })
+        emit(controller, { done: true, summary: { type, item, amount, team, etransferName, hasReceipt } })
       } catch (err) {
         console.error('[finance/submit] Error:', err?.message ?? err)
 
