@@ -53,7 +53,7 @@ Settings keys: agentMode, agentEnabled, agentScanOwner
 ### Stays in `enactus-agent` (the portal — already here)
 ```
 app/page.js  app/layout.js  app/globals.css  app/favicon.ico
-app/finance/page.js          app/api/finance/{events,submit}/route.js
+app/finance/page.js          app/api/finance/submit/route.js
 app/profiles/page.js         app/api/profiles/{ingest,route,upload,url}/route.js
 app/submit/page.js           app/api/submit/route.js
 app/settings/page.js         app/api/settings/route.js
